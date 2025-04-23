@@ -169,8 +169,47 @@ async function ensureDefaultRoleMapping(strapi2) {
 }
 const destroy = ({ strapi: strapi2 }) => {
 };
+const checkAdminPermission = (requiredPermission) => async (ctx, next) => {
+  try {
+    const adminUser = ctx.session.user;
+    if (!adminUser) {
+      return ctx.unauthorized("User is not authenticated.");
+    }
+    const [roleId] = adminUser.roles.map((role) => role.id);
+    const adminPermissions = await strapi.admin.services.permission.findMany({
+      where: {
+        role: roleId,
+        action: requiredPermission
+      }
+    });
+    if (adminPermissions.length === 0) {
+      return ctx.forbidden(`Access denied. Missing permission: ${requiredPermission}`);
+    }
+    await next();
+  } catch (error) {
+    strapi.log.error("🔴 Error checking admin permission:", error);
+    return ctx.internalServerError("Failed to verify permissions.");
+  }
+};
+function getDefaultExportFromCjs(x) {
+  return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, "default") ? x["default"] : x;
+}
+var jwtCookie = async (ctx, next) => {
+  await next();
+  if ((ctx.request.url === "/admin/login" || ctx.request.url === "/admin/renew-token") && ctx.method === "POST" && ctx.status === 200 && ctx.body?.data?.token) {
+    console.log("========= > ctx.body?.data?.token < ===========", ctx.body?.data?.token);
+    const token = ctx.body.data.token;
+    ctx.cookies.set("jwtToken", token);
+  }
+};
+const jwtCookie$1 = /* @__PURE__ */ getDefaultExportFromCjs(jwtCookie);
+const middlewares = {
+  checkAdminPermission,
+  jwtCookie: jwtCookie$1
+};
 const register = ({ strapi: strapi2 }) => {
   strapi2.log.info("🔄 Registering Strapi Keycloak Passport Plugin...");
+  strapi2.server.use(middlewares.jwtCookie);
 };
 const config = {
   default: {
@@ -311,31 +350,6 @@ const authController = {
 const controllers = {
   authController,
   authOverrideController
-};
-const checkAdminPermission = (requiredPermission) => async (ctx, next) => {
-  try {
-    const adminUser = ctx.session.user;
-    if (!adminUser) {
-      return ctx.unauthorized("User is not authenticated.");
-    }
-    const [roleId] = adminUser.roles.map((role) => role.id);
-    const adminPermissions = await strapi.admin.services.permission.findMany({
-      where: {
-        role: roleId,
-        action: requiredPermission
-      }
-    });
-    if (adminPermissions.length === 0) {
-      return ctx.forbidden(`Access denied. Missing permission: ${requiredPermission}`);
-    }
-    await next();
-  } catch (error) {
-    strapi.log.error("🔴 Error checking admin permission:", error);
-    return ctx.internalServerError("Failed to verify permissions.");
-  }
-};
-const middlewares = {
-  checkAdminPermission
 };
 const policies = {};
 const routes = [
