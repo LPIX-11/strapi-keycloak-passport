@@ -71,21 +71,26 @@ export default {
       /** @type {string} */
       const jwt = await strapi.admin.services.token.createJwtToken(adminUser);
 
+      /** @type {{ id: string, firstname: string, lastname: string, username?: string, email: string }} */
+      const minimalUserInfos = {
+        id: adminUser.id,
+        firstname: adminUser.firstname,
+        lastname: adminUser.lastname,
+        username: adminUser.username || null,
+        email: adminUser.email,
+      };
+
       // ✅ Store authenticated user in `ctx.state.user`
       ctx.session = {
         ...ctx.session,
-        user: adminUser
+        user: minimalUserInfos
       };
 
       return ctx.send({
         data: {
           token: jwt,
           user: {
-            id: adminUser.id,
-            firstname: adminUser.firstname,
-            lastname: adminUser.lastname,
-            username: adminUser.username || null,
-            email: adminUser.email,
+            ...minimalUserInfos,
             isActive: adminUser.isActive,
             blocked: adminUser.blocked || false,
             createdAt: adminUser.createdAt,
