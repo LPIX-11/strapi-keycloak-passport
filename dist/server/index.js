@@ -54,7 +54,10 @@ const authOverrideController = {
       };
       ctx.session = {
         ...ctx.session,
-        user: minimalUserInfos
+        user: {
+          ...minimalUserInfos,
+          roles: adminUser.roles.map((role) => ({ id: role.id }))
+        }
       };
       return ctx.send({
         data: {

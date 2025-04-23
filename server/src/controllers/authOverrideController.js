@@ -85,7 +85,7 @@ export default {
         ...ctx.session,
         user: {
           ...minimalUserInfos,
-          roles: adminUser.roles.map(role => role.id),
+          roles: adminUser.roles.map(role => ({ id: role.id })),
         }
       };
 
