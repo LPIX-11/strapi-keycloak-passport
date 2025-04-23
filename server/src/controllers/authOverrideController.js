@@ -83,7 +83,10 @@ export default {
       // ✅ Store authenticated user in `ctx.state.user`
       ctx.session = {
         ...ctx.session,
-        user: minimalUserInfos
+        user: {
+          ...minimalUserInfos,
+          roles: adminUser.roles.map(role => role.id),
+        }
       };
 
       return ctx.send({
