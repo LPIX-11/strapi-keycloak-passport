@@ -69,14 +69,16 @@ function overrideAdminRoutes(strapi) {
 
       if (requestPath === '/admin/login' && requestMethod === 'POST') {
         await authController.login(ctx);
+        return;
       } else if (
         (
           requestPath.includes('auth/reset-password') ||
           requestPath.includes('auth/forgot-password') ||
+          requestPath.includes('auth/register-admin') ||
           requestPath.includes('auth/register')) &&
         requestMethod === 'GET'
       ) {
-        return ctx.redirect('/admin/login');
+        return ctx.redirect('/');
       } else {
         await next();
       }

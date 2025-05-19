@@ -9,6 +9,9 @@ module.exports = async (ctx, next) => {
   ) {
     const token = ctx.body.data.token;
 
-    ctx.cookies.set('jwtToken', token);
+    ctx.cookies.set('jwtToken', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV?.includes('prod') ? true : false,
+    });
   }
 };

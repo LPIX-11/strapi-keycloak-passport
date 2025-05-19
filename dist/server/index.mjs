@@ -125,8 +125,9 @@ function overrideAdminRoutes(strapi2) {
       const requestMethod = ctx.request.method;
       if (requestPath === "/admin/login" && requestMethod === "POST") {
         await authOverrideController.login(ctx);
-      } else if ((requestPath.includes("auth/reset-password") || requestPath.includes("auth/forgot-password") || requestPath.includes("auth/register")) && requestMethod === "GET") {
-        return ctx.redirect("/admin/login");
+        return;
+      } else if ((requestPath.includes("auth/reset-password") || requestPath.includes("auth/forgot-password") || requestPath.includes("auth/register-admin") || requestPath.includes("auth/register")) && requestMethod === "GET") {
+        return ctx.redirect("/");
       } else {
         await next();
       }
@@ -198,7 +199,10 @@ var jwtCookie = async (ctx, next) => {
   await next();
   if ((ctx.request.url === "/admin/login" || ctx.request.url === "/admin/renew-token") && ctx.method === "POST" && ctx.status === 200 && ctx.body?.data?.token) {
     const token = ctx.body.data.token;
-    ctx.cookies.set("jwtToken", token);
+    ctx.cookies.set("jwtToken", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV?.includes("prod") ? true : false
+    });
   }
 };
 const jwtCookie$1 = /* @__PURE__ */ getDefaultExportFromCjs(jwtCookie);
