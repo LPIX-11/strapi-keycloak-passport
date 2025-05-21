@@ -1,6 +1,4 @@
 module.exports = async (ctx, next) => {
-  await next();
-
   if (
     (ctx.request.url === '/admin/login' || ctx.request.url === '/admin/renew-token') &&
     ctx.method === 'POST' &&
@@ -11,7 +9,13 @@ module.exports = async (ctx, next) => {
 
     ctx.cookies.set('jwtToken', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV?.includes('prod') ? true : false,
+      ...process.env.NODE_ENV?.includes('prod') && {
+        secure: true,
+        rolling: true,
+        sameSite: "none",
+      }
     });
   }
+
+  await next();
 };
