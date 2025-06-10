@@ -104,7 +104,7 @@ export default {
     } catch (error) {
       strapi.log.error(
         `🔴 Authentication Failed for ${ctx.request.body?.email || 'unknown user'}:`,
-        error.response?.data || error.message
+        JSON.stringify(error)
       );
 
       return ctx.badRequest('Invalid credentials', {
