@@ -21,10 +21,11 @@ const keycloakService = ({ strapi }) => ({
     try {
       // 🔥 Send request to Keycloak for an admin token
       const tokenResponse = await axios.post(
-        `${config.KEYCLOAK_AUTH_URL}/auth/realms/${config.KEYCLOAK_REALM}/protocol/openid-connect/token`,
+        `${config.KEYCLOAK_AUTH_URL}${config.KEYCLOAK_TOKEN_URL}`,
         new URLSearchParams({
           client_id: config.KEYCLOAK_CLIENT_ID,
           client_secret: config.KEYCLOAK_CLIENT_SECRET,
+          scope: 'openid profile email',
           grant_type: 'client_credentials',
         }).toString(),
         { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }

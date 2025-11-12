@@ -9,11 +9,11 @@ module.exports = async (ctx, next) => {
 
     ctx.cookies.set('jwtToken', token, {
       httpOnly: true,
-      ...process.env.NODE_ENV?.includes('prod') && {
-        secure: true,
-        rolling: true,
-        sameSite: "none",
-      }
+      // ...process.env.NODE_ENV?.includes('prod') && {
+      //   secure: true,
+      //   rolling: true,
+      //   sameSite: "none",
+      // }
     });
   }
 

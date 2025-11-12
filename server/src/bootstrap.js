@@ -1,19 +1,22 @@
-'use strict';
+'use strict'
 
-import authController from './controllers/authOverrideController';
+// import 'module-alias/register'
+
+import authController from './controllers/authOverrideController'
 
 /**
  * @module StrapiKeycloakBootstrap
- * @description Bootstraps the Strapi Keycloak Passport Plugin and overrides admin authentication routes.
+ * @description Bootstraps the Strapi Keycloak Passport Plugin and overrides admin authentication
+ *   routes.
  * @async
  * @function
  * @param {Object} strapi - The Strapi instance.
  */
 const bootstrap = async ({ strapi }) => {
-  strapi.log.info('🚀 Strapi Keycloak Passport Plugin Bootstrapped');
+  strapi.log.info('🚀 Strapi Keycloak Passport Plugin Bootstrapped')
 
   try {
-    strapi.log.info('🔍 Registering Keycloak Plugin Permissions...');
+    strapi.log.info('🔍 Registering Keycloak Plugin Permissions...')
 
     const actions = [
       {
@@ -34,22 +37,25 @@ const bootstrap = async ({ strapi }) => {
         uid: 'manage-role-mappings',
         pluginName: 'strapi-keycloak-passport',
       },
-    ];
+    ]
 
-    await strapi.admin.services.permission.actionProvider.registerMany(actions);
-    strapi.log.info('✅ Keycloak Plugin permissions successfully registered.');
+    await strapi.admin.services.permission.actionProvider.registerMany(actions)
+    strapi.log.info('✅ Keycloak Plugin permissions successfully registered.')
   } catch (error) {
-    strapi.log.error('❌ Failed to register Keycloak Plugin permissions:', error);
+    strapi.log.error(
+      '❌ Failed to register Keycloak Plugin permissions:',
+      error,
+    )
   }
 
   // ✅ Ensure Default Role Mapping Exists
-  await ensureDefaultRoleMapping(strapi);
+  await ensureDefaultRoleMapping(strapi)
 
   // ✅ Apply Middleware to Intercept `/admin/login` Before Strapi Handles It
-  overrideAdminRoutes(strapi);
+  overrideAdminRoutes(strapi)
 
-  strapi.log.info('🔒 Passport Keycloak Strategy Initialized');
-};
+  strapi.log.info('🔒 Passport Keycloak Strategy Initialized')
+}
 
 /**
  * Overrides admin authentication routes to use Keycloak.
@@ -59,42 +65,45 @@ const bootstrap = async ({ strapi }) => {
  */
 function overrideAdminRoutes(strapi) {
   try {
-    strapi.log.info('🛠 Applying Keycloak Authentication Middleware...');
+    strapi.log.info('🛠 Applying Keycloak Authentication Middleware...')
 
     strapi.server.use(async (ctx, next) => {
       /** @type {string} */
-      const requestPath = ctx.request.path;
+      const requestPath = ctx.request.path
       /** @type {string} */
-      const requestMethod = ctx.request.method;
+      const requestMethod = ctx.request.method
 
       if (requestPath === '/admin/login' && requestMethod === 'POST') {
-        await authController.login(ctx);
-        return;
+        await authController.login(ctx)
       } else if (
-        (
-          requestPath.includes('auth/reset-password') ||
+        (requestPath.includes('auth/reset-password') ||
           requestPath.includes('auth/forgot-password') ||
-          requestPath.includes('auth/register-admin') ||
           requestPath.includes('auth/register')) &&
         requestMethod === 'GET'
       ) {
-        return ctx.redirect('/');
+        return ctx.redirect('/admin/login')
       } else {
-        await next();
+        await next()
       }
-    });
+      // if (requestPath.includes('/me')) {
+      // console.log('ctx.request')
+      // ctx.request.header.authorization = `Bearer ${ctx.cookies.get('jwtToken')}`
+      // console.log(ctx.request)
+      // }
+    })
+
 
     strapi.log.info(`
-      
+
     ╔════════════════════════════════╗
     ║      🛡️ PASSPORT APPLIED 🛡️      ║
     ╚════════════════════════════════╝
-    `);
-    strapi.log.info('🚴 Admin login request rerouted to passport.');
-    strapi.log.info('📒 Registration route blocked. 🚫');
-    strapi.log.info('🕵️‍♂️ Reset password route blocked. 🚫');
+    `)
+    strapi.log.info('🚴 Admin login request rerouted to passport.')
+    strapi.log.info('📒 Registration route blocked. 🚫')
+    strapi.log.info('🕵️‍♂️ Reset password route blocked. 🚫')
   } catch (error) {
-    strapi.log.error('❌ Failed to register Keycloak Middleware:', error);
+    strapi.log.error('❌ Failed to register Keycloak Middleware:', error)
   }
 }
 
@@ -107,39 +116,34 @@ function overrideAdminRoutes(strapi) {
  */
 async function ensureDefaultRoleMapping(strapi) {
   try {
-    /** @type {Object} */
-    const superAdminRole = await strapi.db
-      .query('admin::role')
-      .findOne({ where: { code: 'strapi-super-admin' } });
-
-    if (!superAdminRole) {
-      strapi.log.warn('⚠️ Super Admin role not found. Skipping default role mapping.');
-      return;
-    }
 
     /** @type {Object} */
     const DEFAULT_MAPPING = {
       keycloakRole: 'SUPER_ADMIN',
-      strapiRole: superAdminRole.id, // 🔹 Fetch role ID dynamically
-    };
+      strapiRole: 1,
+    }
 
     /** @type {Object} */
     const existingMapping = await strapi.db
       .query('plugin::strapi-keycloak-passport.role-mapping')
-      .findOne({ where: { keycloakRole: DEFAULT_MAPPING.keycloakRole } });
+      .findOne({ where: { keycloakRole: DEFAULT_MAPPING.keycloakRole } })
 
     if (!existingMapping) {
       await strapi.db
         .query('plugin::strapi-keycloak-passport.role-mapping')
-        .create({ data: DEFAULT_MAPPING });
+        .create({ data: DEFAULT_MAPPING })
 
-      strapi.log.info(`✅ Default Role Mapping Created: ${DEFAULT_MAPPING.keycloakRole} -> ${DEFAULT_MAPPING.strapiRole} (mapped to Super Admin Role)`);
+      strapi.log.info(
+        `✅ Default Role Mapping Created: ${DEFAULT_MAPPING.keycloakRole} -> ${DEFAULT_MAPPING.strapiRole} (mapped to Super Admin Role)`,
+      )
     } else {
-      strapi.log.info(`✅ Default Role Mapping Already Exists: ${existingMapping.keycloakRole} -> ${existingMapping.strapiRole} (mapping to Super Admin Role)`);
+      strapi.log.info(
+        `✅ Default Role Mapping Already Exists: ${existingMapping.keycloakRole} -> ${existingMapping.strapiRole} (mapping to Super Admin Role)`,
+      )
     }
   } catch (error) {
-    strapi.log.error('❌ Failed to create default role mapping:', error);
+    strapi.log.error('❌ Failed to create default role mapping:', error)
   }
 }
 
-export default bootstrap;
+export default bootstrap

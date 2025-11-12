@@ -58,12 +58,12 @@ const adminUserService = ({ strapi }) => ({
       try {
         // 🔥 Fetch user roles from Keycloak
         const keycloakRoles = await fetchKeycloakUserRoles(keycloakUserId, strapi);
-
         // 🔄 Map Keycloak roles to Strapi roles
         keycloakRoles.forEach((role) => {
           const mappedRole = roleMappings.find(mapped => mapped.keycloakRole === role);
           if (mappedRole) appliedRoles.add(mappedRole.strapiRole);
         });
+
       } catch (error) {
         strapi.log.error('❌ Failed to fetch user roles from Keycloak:', error.response?.data || error.message);
       }
@@ -85,7 +85,7 @@ const adminUserService = ({ strapi }) => ({
         });
       }
 
-      if (JSON.stringify(adminUser.roles) !== JSON.stringify(userRoles)) {
+      if (JSON.stringify(adminUser?.roles) !== JSON.stringify(userRoles)) {
         await strapi.documents('admin::user').update({
           documentId: adminUser.documentId,
           data: {

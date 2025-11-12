@@ -7,7 +7,7 @@ export default {
     KEYCLOAK_TOKEN_URL: '',
     KEYCLOAK_USERINFO_URL: '',
     roleConfigs: {
-      defaultRoleId: 5,
+      defaultRoleId: 1,
       excludedRoles: [],
     },
   },
