@@ -1,6 +1,6 @@
 {
   "name": "strapi-keycloak-passport",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "Keycloak authentication provider for the Strapi v5 administration panel.",
   "license": "MIT",
   "author": "LPIX-11 <mohamed.johnson@orange-sonatel.com>",
@@ -46,20 +46,22 @@
     "prepublishOnly": "yarn build"
   },
   "dependencies": {
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
     "@strapi/design-system": "^2.0.0-rc.18",
     "@strapi/icons": "^2.0.0-rc.18",
     "@strapi/sdk-plugin": "^5.3.2",
-    "@strapi/strapi": "^5.11.3",
+    "@strapi/strapi": "^5.32.0",
     "axios": "^1.8.2",
-    "prettier": "^3.5.3",
+    "prettier": "^3.7.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.30.0",
-    "styled-components": "^6.1.16"
+    "react-router-dom": "^6.30.2",
+    "styled-components": "^6.1.19"
   },
   "peerDependencies": {
     "@strapi/sdk-plugin": "^5.3.2",
-    "@strapi/strapi": "^5.11.3",
+    "@strapi/strapi": "^5.32.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.30.0",
