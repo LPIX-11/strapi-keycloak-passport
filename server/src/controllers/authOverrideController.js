@@ -1,30 +1,138 @@
+/**
+ * @fileoverview Authentication override controller for Keycloak SSO.
+ * Replaces Strapi's default admin login with Keycloak OAuth2 authentication.
+ * @module controllers/authOverrideController
+ * @author Strapi Keycloak Passport Team
+ */
+
 'use strict';
 
 import axios from 'axios';
+import {
+  PLUGIN_ID,
+  PLUGIN_NAMESPACE,
+  KEYCLOAK_ENDPOINTS,
+  KEYCLOAK_PATHS,
+  HTTP,
+  OAUTH_SCOPES,
+  SESSION,
+  ERROR_CODES,
+} from '../constants.js';
+import { createSanitizedError, PluginError, extractSafeError } from '../utils/errors.js';
 
 /**
- * --- Local copy of Strapi's session-auth helpers ---
- * (Taken from packages/core/admin/shared/utils/session-auth.ts)
+ * @typedef {Object} KoaContext
+ * @property {Object} request - Koa request object
+ * @property {Object} state - Request state including user info
+ * @property {Object} session - Koa session object
+ * @property {Object} cookies - Cookie management
+ * @property {Function} send - Send response function
+ * @property {Function} badRequest - Send 400 response function
+ * @property {Function} internalServerError - Send 500 response function
  */
 
-export const REFRESH_COOKIE_NAME = 'strapi_admin_refresh';
+/**
+ * @typedef {Object} AuthCredentials
+ * @property {string} email - User's email address
+ * @property {string} password - User's password
+ */
 
-const DEFAULT_MAX_REFRESH_TOKEN_LIFESPAN = 30 * 24 * 60 * 60;
-const DEFAULT_IDLE_REFRESH_TOKEN_LIFESPAN = 14 * 24 * 60 * 60;
-const DEFAULT_MAX_SESSION_LIFESPAN = 1 * 24 * 60 * 60;
-const DEFAULT_IDLE_SESSION_LIFESPAN = 2 * 60 * 60;
+/**
+ * @typedef {Object} KeycloakTokenResponse
+ * @property {string} access_token - OAuth access token
+ * @property {number} expires_in - Token lifetime in seconds
+ * @property {string} token_type - Token type (Bearer)
+ * @property {string} [refresh_token] - Optional refresh token
+ */
 
-const getRefreshCookieOptions = (secureRequest) => {
+/**
+ * @typedef {Object} KeycloakUserInfo
+ * @property {string} sub - Keycloak user ID
+ * @property {string} email - User's email
+ * @property {string} [preferred_username] - Preferred username
+ * @property {string} [given_name] - First name
+ * @property {string} [family_name] - Last name
+ * @property {boolean} [email_verified] - Email verification status
+ */
+
+/**
+ * Gets the plugin configuration.
+ *
+ * @returns {Object} Plugin configuration
+ * @private
+ */
+const getConfig = () => strapi.config.get(PLUGIN_NAMESPACE);
+
+/**
+ * Gets the admin user service.
+ *
+ * @returns {Object} Admin user service
+ * @private
+ */
+const getAdminUserService = () => strapi.plugin(PLUGIN_ID).service('adminUserService');
+
+/**
+ * Gets the audit log service.
+ *
+ * @returns {Object} Audit log service
+ * @private
+ */
+const getAuditLogService = () => strapi.plugin(PLUGIN_ID).service('auditLogService');
+
+/**
+ * Gets the session manager from Strapi.
+ *
+ * @returns {Object|null} Session manager or null
+ * @private
+ */
+const getSessionManager = () => strapi.sessionManager ?? null;
+
+/**
+ * Determines the auth path prefix based on Keycloak version.
+ *
+ * @returns {string} Auth path prefix
+ * @private
+ */
+const getAuthPrefix = () => {
+  const config = getConfig();
+  return config.KEYCLOAK_LEGACY_MODE
+    ? KEYCLOAK_PATHS.LEGACY_AUTH_PREFIX
+    : KEYCLOAK_PATHS.MODERN_AUTH_PREFIX;
+};
+
+/**
+ * Builds a Keycloak endpoint URL.
+ *
+ * @param {string} endpointTemplate - Endpoint template
+ * @returns {string} Full endpoint URL
+ * @private
+ */
+const buildEndpointUrl = (endpointTemplate) => {
+  const config = getConfig();
+  const authPrefix = getAuthPrefix();
+
+  let url = config.KEYCLOAK_AUTH_URL.replace(/\/+$/, '');
+  url += authPrefix;
+  url += endpointTemplate.replace('{realm}', config.KEYCLOAK_REALM);
+
+  return url;
+};
+
+/**
+ * Gets cookie options base configuration.
+ *
+ * @param {boolean} [secureRequest] - Whether request is secure
+ * @returns {Object} Base cookie options
+ * @private
+ */
+const getBaseCookieOptions = (secureRequest) => {
   const configuredSecure = strapi.config.get('admin.auth.cookie.secure');
   const isProduction = process.env.NODE_ENV === 'production';
 
-  const domain =
-    strapi.config.get('admin.auth.cookie.domain') ||
-    strapi.config.get('admin.auth.domain');
+  const domain = strapi.config.get('admin.auth.cookie.domain') ||
+                 strapi.config.get('admin.auth.domain');
   const path = strapi.config.get('admin.auth.cookie.path', '/admin');
-
-  const sameSite =
-    strapi.config.get('admin.auth.cookie.sameSite') ?? 'lax';
+  const sameSite = strapi.config.get('admin.auth.cookie.sameSite') ?? 'lax';
 
   let isSecure;
   if (typeof configuredSecure === 'boolean') {
@@ -46,51 +154,30 @@ const getRefreshCookieOptions = (secureRequest) => {
   };
 };
 
-const getLifespansForType = (type) => {
-  if (type === 'refresh') {
-    const idleSeconds = Number(
-      strapi.config.get(
-        'admin.auth.sessions.idleRefreshTokenLifespan',
-        DEFAULT_IDLE_REFRESH_TOKEN_LIFESPAN
-      )
-    );
-    const maxSeconds = Number(
-      strapi.config.get(
-        'admin.auth.sessions.maxRefreshTokenLifespan',
-        DEFAULT_MAX_REFRESH_TOKEN_LIFESPAN
-      )
-    );
+/**
+ * Builds cookie options with proper security settings.
+ *
+ * @param {string} type - Token type ('refresh' or 'session')
+ * @param {string} [absoluteExpiresAtISO] - Absolute expiry timestamp
+ * @param {boolean} [secureRequest] - Whether request is secure
+ * @returns {Object} Cookie options
+ * @private
+ */
+const buildCookieOptions = (type, absoluteExpiresAtISO, secureRequest) => {
+  const baseOptions = getBaseCookieOptions(secureRequest);
 
-    return { idleSeconds, maxSeconds };
+  if (type === 'session') {
+    return baseOptions;
   }
 
+  // Calculate expiry for refresh token
   const idleSeconds = Number(
     strapi.config.get(
-      'admin.auth.sessions.idleSessionLifespan',
-      DEFAULT_IDLE_SESSION_LIFESPAN
-    )
-  );
-  const maxSeconds = Number(
-    strapi.config.get(
-      'admin.auth.sessions.maxSessionLifespan',
-      DEFAULT_MAX_SESSION_LIFESPAN
+      'admin.auth.sessions.idleRefreshTokenLifespan',
+      SESSION.IDLE_REFRESH_TOKEN_LIFESPAN
     )
   );
 
-  return { idleSeconds, maxSeconds };
-};
-
-const buildCookieOptionsWithExpiry = (
-  type,
-  absoluteExpiresAtISO,
-  secureRequest
-) => {
-  const base = getRefreshCookieOptions(secureRequest);
-  if (type === 'session') {
-    return base;
-  }
-
-  const { idleSeconds } = getLifespansForType('refresh');
   const now = Date.now();
   const idleExpiry = now + idleSeconds * 1000;
   const absoluteExpiry = absoluteExpiresAtISO
@@ -99,19 +186,21 @@ const buildCookieOptionsWithExpiry = (
   const chosen = new Date(Math.min(idleExpiry, absoluteExpiry));
 
   return {
-    ...base,
+    ...baseOptions,
     expires: chosen,
     maxAge: Math.max(0, chosen.getTime() - now),
   };
 };
 
-const getSessionManager = () => {
-  const manager = strapi.sessionManager;
-  return manager ?? null;
-};
-
+/**
+ * Extracts device parameters from request body.
+ *
+ * @param {Object} requestBody - Request body
+ * @returns {Object} Device parameters
+ * @private
+ */
 const extractDeviceParams = (requestBody) => {
-  const body = (requestBody ?? {});
+  const body = requestBody ?? {};
   const deviceId = body.deviceId || crypto.randomUUID();
   const rememberMe = Boolean(body.rememberMe);
 
@@ -119,101 +208,14 @@ const extractDeviceParams = (requestBody) => {
 };
 
 /**
- * --- Typedefs & constants ---
+ * Extracts and validates credentials from request.
+ *
+ * @param {KoaContext} ctx - Koa context
+ * @returns {AuthCredentials} Validated credentials
+ * @throws {PluginError} If credentials are invalid
+ * @private
  */
-
-/**
- * @typedef {Object} KoaContext
- * @property {{ body?: Record<string, unknown>, header?: Record<string, string> }} request
- * @property {Record<string, unknown>} state
- * @property {Record<string, unknown>|undefined} [session]
- * @property {(message: string, details?: unknown) => void} badRequest
- * @property {(body: unknown, status?: number) => void} send
- * @property {string} ip
- * @property {{ set: (name: string, value: string, options?: Record<string, unknown>) => void; get: (name: string) => string | undefined }} cookies
- */
-
-/**
- * @typedef {Object} AuthCredentials
- * @property {string} email
- * @property {string} password
- */
-
-/**
- * @typedef {Object} KeycloakPluginConfig
- * @property {string} KEYCLOAK_AUTH_URL
- * @property {string} KEYCLOAK_TOKEN_URL
- * @property {string} KEYCLOAK_USERINFO_URL
- * @property {string} KEYCLOAK_CLIENT_ID
- * @property {string} KEYCLOAK_CLIENT_SECRET
- */
-
-/**
- * @typedef {Object} KeycloakTokenPayload
- * @property {string} access_token
- */
-
-/**
- * @typedef {Object} AdminUser
- * @property {number|string} id
- * @property {string} email
- * @property {string} firstname
- * @property {string} lastname
- * @property {string|null} [username]
- * @property {boolean} [isActive]
- * @property {boolean} [blocked]
- * @property {string|Date} [createdAt]
- * @property {string|Date} [updatedAt]
- */
-
-/**
- * Constant HTTP header names used by the controller.
- */
-const HTTP_HEADERS = {
-  CONTENT_TYPE: 'Content-Type',
-  AUTHORIZATION: 'Authorization',
-};
-
-/**
- * Constant HTTP header values used by the controller.
- */
-const HTTP_HEADER_VALUES = {
-  FORM_URLENCODED: 'application/x-www-form-urlencoded',
-};
-
-/**
- * Default OAuth2 scope requested from Keycloak.
- */
-const KEYCLOAK_DEFAULT_SCOPE = 'email profile openid';
-
-/**
- * Structured error code identifiers used internally by the controller.
- */
-const AUTH_ERROR_CODES = {
-  INVALID_PAYLOAD: 'INVALID_PAYLOAD',
-  INVALID_CONFIGURATION: 'INVALID_CONFIGURATION',
-  KEYCLOAK_TOKEN_ERROR: 'KEYCLOAK_TOKEN_ERROR',
-  KEYCLOAK_USERINFO_ERROR: 'KEYCLOAK_USERINFO_ERROR',
-  JWT_ISSUE_ERROR: 'JWT_ISSUE_ERROR',
-  INTERNAL_ERROR: 'INTERNAL_ERROR',
-};
-
-/**
- * Creates a standardized error object for the authentication flow.
- */
-function createAuthError(code, message, details) {
-  const error = new Error(message);
-  error.code = code;
-  if (details !== undefined) {
-    error.details = details;
-  }
-  return error;
-}
-
-/**
- * Extracts and validates user credentials from the request context.
- */
-function extractCredentials(ctx) {
+const extractCredentials = (ctx) => {
   const rawBody = ctx.request?.body || {};
   const email = rawBody.email;
   const password = rawBody.password;
@@ -222,9 +224,10 @@ function extractCredentials(ctx) {
   const isPasswordValid = typeof password === 'string' && password.trim().length > 0;
 
   if (!isEmailValid || !isPasswordValid) {
-    throw createAuthError(
-      AUTH_ERROR_CODES.INVALID_PAYLOAD,
-      'Missing or invalid email/password in request body.',
+    throw createSanitizedError(
+      ERROR_CODES.INVALID_PAYLOAD,
+      `Invalid credentials provided: email=${isEmailValid}, password=${isPasswordValid}`,
+      'Missing or invalid email/password.',
       { hasEmail: isEmailValid, hasPassword: isPasswordValid }
     );
   }
@@ -233,141 +236,110 @@ function extractCredentials(ctx) {
     email: email.trim(),
     password: password.trim(),
   };
-}
-
-/**
- * Resolves and validates the plugin configuration for Keycloak.
- */
-function getKeycloakConfig() {
-  const config = strapi.config.get('plugin::strapi-keycloak-passport') || {};
-
-  const requiredKeys = [
-    'KEYCLOAK_AUTH_URL',
-    'KEYCLOAK_TOKEN_URL',
-    'KEYCLOAK_USERINFO_URL',
-    'KEYCLOAK_CLIENT_ID',
-    'KEYCLOAK_CLIENT_SECRET',
-  ];
-
-  const missingKeys = requiredKeys.filter((key) => {
-    const value = config[key];
-    return typeof value !== 'string' || value.trim().length === 0;
-  });
-
-  if (missingKeys.length > 0) {
-    throw createAuthError(
-      AUTH_ERROR_CODES.INVALID_CONFIGURATION,
-      'Keycloak plugin configuration is incomplete.',
-      { missingKeys }
-    );
-  }
-
-  return config;
-}
+};
 
 /**
  * Requests an access token from Keycloak using password grant.
+ *
+ * @param {AuthCredentials} credentials - User credentials
+ * @returns {Promise<KeycloakTokenResponse>} Token response
+ * @throws {PluginError} If token request fails
+ * @private
  */
-async function requestKeycloakToken(credentials, config) {
+const requestKeycloakToken = async (credentials) => {
+  const config = getConfig();
+  const tokenUrl = buildEndpointUrl(KEYCLOAK_ENDPOINTS.TOKEN);
+
   try {
-    const tokenUrl = `${config.KEYCLOAK_AUTH_URL}${config.KEYCLOAK_TOKEN_URL}`;
+    const response = await axios.post(
+      tokenUrl,
+      new URLSearchParams({
+        client_id: config.KEYCLOAK_CLIENT_ID,
+        client_secret: config.KEYCLOAK_CLIENT_SECRET,
+        username: credentials.email,
+        password: credentials.password,
+        grant_type: HTTP.GRANT_TYPES.PASSWORD,
+        scope: OAUTH_SCOPES.DEFAULT,
+      }).toString(),
+      {
+        headers: {
+          [HTTP.HEADERS.CONTENT_TYPE]: HTTP.CONTENT_TYPES.FORM_URLENCODED,
+        },
+      }
+    );
 
-    const requestBody = new URLSearchParams({
-      client_id: config.KEYCLOAK_CLIENT_ID,
-      client_secret: config.KEYCLOAK_CLIENT_SECRET,
-      username: credentials.email,
-      password: credentials.password,
-      grant_type: 'password',
-      scope: KEYCLOAK_DEFAULT_SCOPE,
-    });
+    const tokenData = response.data;
 
-    const response = await axios.post(tokenUrl, requestBody.toString(), {
-      headers: {
-        [HTTP_HEADERS.CONTENT_TYPE]: HTTP_HEADER_VALUES.FORM_URLENCODED,
-      },
-    });
-
-    const tokenPayload = response.data;
-
-    if (!tokenPayload || typeof tokenPayload.access_token !== 'string') {
-      throw createAuthError(
-        AUTH_ERROR_CODES.KEYCLOAK_TOKEN_ERROR,
-        'Keycloak token response is missing access_token.',
-        { rawResponse: response.data }
+    if (!tokenData?.access_token) {
+      throw createSanitizedError(
+        ERROR_CODES.KEYCLOAK_TOKEN_ERROR,
+        'Keycloak returned empty access_token',
+        'Authentication failed.'
       );
     }
 
-    return tokenPayload;
+    return tokenData;
   } catch (error) {
-    strapi.log.error('🔴 Keycloak token request failed:', error?.response?.data || error.message);
+    if (error instanceof PluginError) {
+      throw error;
+    }
 
-    throw createAuthError(
-      AUTH_ERROR_CODES.KEYCLOAK_TOKEN_ERROR,
-      'Unable to obtain an access token from Keycloak.',
-      error
+    strapi.log.error('Keycloak token request failed:', {
+      status: error.response?.status,
+      data: error.response?.data,
+    });
+
+    throw createSanitizedError(
+      ERROR_CODES.KEYCLOAK_TOKEN_ERROR,
+      `Token request failed: ${error.response?.status || error.message}`,
+      'Invalid credentials.'
     );
   }
-}
+};
 
 /**
- * Fetches the authenticated user information from Keycloak.
+ * Fetches user information from Keycloak.
+ *
+ * @param {string} accessToken - OAuth access token
+ * @returns {Promise<KeycloakUserInfo>} User information
+ * @throws {PluginError} If userinfo request fails
+ * @private
  */
-async function fetchKeycloakUserInfo(accessToken, config) {
-  try {
-    const userInfoUrl = `${config.KEYCLOAK_AUTH_URL}${config.KEYCLOAK_USERINFO_URL}`;
+const fetchUserInfo = async (accessToken) => {
+  const userInfoUrl = buildEndpointUrl(KEYCLOAK_ENDPOINTS.USERINFO);
 
+  try {
     const response = await axios.get(userInfoUrl, {
       headers: {
-        [HTTP_HEADERS.AUTHORIZATION]: `Bearer ${accessToken}`,
+        [HTTP.HEADERS.AUTHORIZATION]: `Bearer ${accessToken}`,
       },
     });
 
-    const userInfo = response.data || {};
-
-    return userInfo;
+    return response.data || {};
   } catch (error) {
-    strapi.log.error('🔴 Keycloak userinfo request failed:', error?.response?.data || error.message);
+    strapi.log.error('Keycloak userinfo request failed:', {
+      status: error.response?.status,
+      data: error.response?.data,
+    });
 
-    throw createAuthError(
-      AUTH_ERROR_CODES.KEYCLOAK_USERINFO_ERROR,
-      'Unable to retrieve user information from Keycloak.',
-      error
+    throw createSanitizedError(
+      ERROR_CODES.KEYCLOAK_USERINFO_ERROR,
+      `Userinfo request failed: ${error.response?.status || error.message}`,
+      'Failed to retrieve user information.'
     );
   }
-}
+};
 
 /**
- * Synchronizes the Keycloak user with the Strapi admin user model.
+ * Builds the login response payload.
+ *
+ * @param {string} accessToken - Strapi access token
+ * @param {Object} adminUser - Admin user object
+ * @returns {Object} Login response
+ * @private
  */
-async function synchronizeAdminUser(keycloakUserInfo) {
-  const adminUser = await strapi
-    .service('plugin::strapi-keycloak-passport.adminUserService')
-    .findOrCreate(keycloakUserInfo);
-
-  return adminUser;
-}
-
-/**
- * Attaches the authenticated admin user to the Koa context and session.
- */
-function attachAdminToContext(ctx, adminUser) {
-  ctx.state.admin = adminUser;
-  ctx.state.user = adminUser;
-
-  ctx.session = {
-    ...(ctx.session || {}),
-    user: adminUser,
-    admin: { id: adminUser.id },
-  };
-}
-
-/**
- * Builds the response payload for a successful login.
- * Same shape as core /admin/login.
- */
-function buildLoginResponse(accessToken, adminUser) {
-  const sanitizeUser =
-    strapi.admin?.services?.user?.sanitizeUser || ((u) => u);
+const buildLoginResponse = (accessToken, adminUser) => {
+  const sanitizeUser = strapi.admin?.services?.user?.sanitizeUser || ((u) => u);
 
   return {
     data: {
@@ -376,55 +348,76 @@ function buildLoginResponse(accessToken, adminUser) {
       user: sanitizeUser(adminUser),
     },
   };
-}
+};
 
 /**
- * Handles any error raised during the authentication flow.
+ * Handles login errors with proper logging and response.
+ *
+ * @param {KoaContext} ctx - Koa context
+ * @param {Error} error - Error that occurred
+ * @param {string} [email] - User email for audit logging
+ * @private
  */
-function handleLoginError(ctx, error) {
-  const errorCode = error.code || AUTH_ERROR_CODES.INTERNAL_ERROR;
+const handleLoginError = async (ctx, error, email) => {
+  const auditLogService = getAuditLogService();
+  const safeError = extractSafeError(error);
 
-  strapi.log.error(
-    `🔴 Admin authentication failed [${errorCode}]:`,
-    error.details || error.message
-  );
+  strapi.log.error(`Admin authentication failed [${safeError.code}]:`, error.message);
+
+  // Log failed login attempt (non-blocking)
+  if (email) {
+    auditLogService.logLoginFailure({ email, reason: safeError.message }, ctx);
+  }
 
   ctx.badRequest('Invalid credentials', {
     error: {
       status: 400,
-      name: error.name || 'ApplicationError',
-      code: errorCode,
+      name: 'ApplicationError',
+      code: safeError.code,
       message: 'Invalid credentials',
-      details: error.details || {},
     },
   });
-}
+};
 
 /**
- * AuthOverrideController
- *
- * Delegates admin authentication to Keycloak, then uses the SAME
- * session/token machinery as core /admin/login.
+ * Authentication override controller.
+ * Handles Keycloak-based admin authentication.
  */
 const AuthOverrideController = {
+  /**
+   * Authenticates an admin user via Keycloak OAuth2 password grant.
+   * Replaces Strapi's default /admin/login endpoint.
+   *
+   * @async
+   * @param {KoaContext} ctx - Koa context
+   * @returns {Promise<void>}
+   *
+   * @example
+   * // POST /admin/login
+   * // Body: { email: "user@example.com", password: "secret", rememberMe: true }
+   * // Response: { data: { token: "...", user: {...} } }
+   */
   async login(ctx) {
+    let credentials = null;
+
     try {
-      const credentials = extractCredentials(ctx);
-      const config = getKeycloakConfig();
+      // Extract and validate credentials
+      credentials = extractCredentials(ctx);
 
-      strapi.log.info(`🔵 Authenticating ${credentials.email} via Keycloak Passport...`);
+      strapi.log.info(`Authenticating ${credentials.email} via Keycloak Passport...`);
 
-      // 1️⃣ Authenticate with Keycloak
-      const tokenPayload = await requestKeycloakToken(credentials, config);
-      const keycloakUserInfo = await fetchKeycloakUserInfo(tokenPayload.access_token, config);
+      // 1. Authenticate with Keycloak
+      const tokenPayload = await requestKeycloakToken(credentials);
+      const keycloakUserInfo = await fetchUserInfo(tokenPayload.access_token);
 
-      // 2️⃣ Sync / resolve admin user
-      const adminUser = await synchronizeAdminUser(keycloakUserInfo);
+      // 2. Sync/resolve admin user
+      const adminUserService = getAdminUserService();
+      const adminUser = await adminUserService.findOrCreate(keycloakUserInfo, ctx);
 
-      // 3️⃣ Put user on ctx.state like passport/local does
+      // 3. Set user on context
       ctx.state.user = adminUser;
 
-      // 4️⃣ Use Strapi's session manager exactly like core /admin/login
+      // 4. Generate Strapi session tokens
       const sessionManager = getSessionManager();
       if (!sessionManager) {
         strapi.log.error('Admin session manager is not available');
@@ -432,7 +425,7 @@ const AuthOverrideController = {
       }
 
       const userId = String(adminUser.id);
-      const { deviceId, rememberMe } = extractDeviceParams(ctx.request.body || {});
+      const { deviceId, rememberMe } = extractDeviceParams(ctx.request.body);
 
       const {
         token: refreshToken,
@@ -441,32 +434,47 @@ const AuthOverrideController = {
         type: rememberMe ? 'refresh' : 'session',
       });
 
-      const cookieOptions = buildCookieOptionsWithExpiry(
+      // 5. Set refresh token cookie
+      const cookieOptions = buildCookieOptions(
         rememberMe ? 'refresh' : 'session',
         absoluteExpiresAt,
         ctx.request.secure
       );
 
-      ctx.cookies.set(REFRESH_COOKIE_NAME, refreshToken, cookieOptions);
+      ctx.cookies.set(SESSION.REFRESH_COOKIE_NAME, refreshToken, cookieOptions);
 
+      // 6. Generate access token
       const accessResult = await sessionManager('admin').generateAccessToken(refreshToken);
       if ('error' in accessResult) {
-        strapi.log.error('Failed to generate access token from admin refresh token', accessResult);
+        strapi.log.error('Failed to generate access token', accessResult);
         return ctx.internalServerError();
       }
 
       const { token: accessToken } = accessResult;
 
-      // 5️⃣ Attach admin to context/session for downstream use
-      attachAdminToContext(ctx, adminUser);
+      // 7. Attach admin to context/session
+      ctx.state.admin = adminUser;
+      ctx.session = {
+        ...(ctx.session || {}),
+        user: adminUser,
+        admin: { id: adminUser.id },
+      };
 
-      strapi.log.info(`✅ ${credentials.email} successfully authenticated via Keycloak.`);
+      strapi.log.info(`${credentials.email} successfully authenticated via Keycloak.`);
 
-      // 6️⃣ Build response exactly like core /admin/login
-      const responseBody = buildLoginResponse(accessToken, adminUser);
-      ctx.body = responseBody;
+      // 8. Log successful login (non-blocking)
+      const auditLogService = getAuditLogService();
+      auditLogService.logLoginSuccess({
+        email: credentials.email,
+        keycloakUserId: keycloakUserInfo.sub,
+        userId: String(adminUser.id),
+        roles: adminUser.roles?.map((r) => r.name) || [],
+      }, ctx);
+
+      // 9. Send response
+      ctx.body = buildLoginResponse(accessToken, adminUser);
     } catch (error) {
-      handleLoginError(ctx, error);
+      await handleLoginError(ctx, error, credentials?.email);
     }
   },
 };

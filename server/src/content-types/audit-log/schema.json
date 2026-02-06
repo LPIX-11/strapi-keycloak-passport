@@ -1,0 +1,77 @@
+{
+  "kind": "collectionType",
+  "collectionName": "keycloak_audit_logs",
+  "info": {
+    "singularName": "audit-log",
+    "pluralName": "audit-logs",
+    "displayName": "Keycloak Audit Log",
+    "description": "Audit trail for Keycloak Passport authentication events and actions."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "pluginOptions": {
+    "content-manager": {
+      "visible": true
+    },
+    "content-type-builder": {
+      "visible": false
+    }
+  },
+  "attributes": {
+    "action": {
+      "type": "enumeration",
+      "enum": [
+        "LOGIN_SUCCESS",
+        "LOGIN_FAILURE",
+        "LOGOUT",
+        "USER_CREATED",
+        "USER_UPDATED",
+        "ROLE_ASSIGNED",
+        "ROLE_REMOVED",
+        "MAPPING_CREATED",
+        "MAPPING_UPDATED",
+        "MAPPING_DELETED",
+        "TOKEN_REFRESHED"
+      ],
+      "required": true
+    },
+    "userEmail": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "userId": {
+      "type": "string",
+      "maxLength": 100
+    },
+    "keycloakUserId": {
+      "type": "string",
+      "maxLength": 100
+    },
+    "ipAddress": {
+      "type": "string",
+      "maxLength": 45
+    },
+    "userAgent": {
+      "type": "string",
+      "maxLength": 500
+    },
+    "details": {
+      "type": "json"
+    },
+    "performedById": {
+      "type": "integer"
+    },
+    "performedByEmail": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "success": {
+      "type": "boolean",
+      "default": true
+    },
+    "errorMessage": {
+      "type": "text"
+    }
+  }
+}

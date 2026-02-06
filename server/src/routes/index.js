@@ -1,22 +1,38 @@
-import checkAdminPermission from '../middlewares/checkAdminPermission';
+/**
+ * @fileoverview Route definitions for the Strapi Keycloak Passport plugin.
+ * Defines all API endpoints with their handlers, authentication, and middleware.
+ * @module routes
+ * @author Strapi Keycloak Passport Team
+ */
+
+import checkAdminPermission from '../middlewares/checkAdminPermission.js';
+import { PERMISSIONS } from '../constants.js';
 
 /**
- * Strapi Keycloak Passport Plugin Routes (Strapi v5)
+ * Plugin route definitions.
+ * All routes are prefixed with `/strapi-keycloak-passport/` by Strapi.
  *
- * @module Routes
+ * @type {Array<Object>}
  */
 const routes = [
-  // ✅ Override Admin Login with Keycloak
+  /**
+   * Admin Login Override
+   * Replaces Strapi's default /admin/login with Keycloak authentication.
+   */
   {
     method: 'POST',
     path: '/admin/login',
     handler: 'authOverrideController.login',
     config: {
-      auth: false, // No auth required for login
+      auth: false,
+      description: 'Authenticate admin user via Keycloak OAuth2',
     },
   },
 
-  // ✅ Get Keycloak Roles (Admin Permission Required)
+  /**
+   * Get Keycloak and Strapi Roles
+   * Fetches available roles for mapping configuration.
+   */
   {
     method: 'GET',
     path: '/keycloak-roles',
@@ -24,31 +40,88 @@ const routes = [
     config: {
       auth: false,
       policies: [],
-      middlewares: [checkAdminPermission('plugin::strapi-keycloak-passport.access')],
+      middlewares: [checkAdminPermission(PERMISSIONS.ACCESS)],
+      description: 'Fetch available Keycloak and Strapi admin roles',
     },
   },
 
-  // ✅ Get Role Mappings (Admin Permission Required)
+  /**
+   * Get Role Mappings
+   * Retrieves saved Keycloak-to-Strapi role mappings.
+   */
   {
     method: 'GET',
     path: '/get-keycloak-role-mappings',
     handler: 'authController.getRoleMappings',
     config: {
-      auth: false, // ✅ Required for admin data access
+      auth: false,
       policies: [],
-      middlewares: [checkAdminPermission('plugin::strapi-keycloak-passport.view-role-mappings')],
+      middlewares: [checkAdminPermission(PERMISSIONS.VIEW_MAPPINGS)],
+      description: 'Get saved Keycloak to Strapi role mappings',
     },
   },
 
-  // ✅ Save Role Mappings (Requires Manage Permission)
+  /**
+   * Save Role Mappings
+   * Persists Keycloak-to-Strapi role mappings.
+   */
   {
     method: 'POST',
     path: '/save-keycloak-role-mappings',
     handler: 'authController.saveRoleMappings',
     config: {
-      auth: false, // ✅ Ensures only admins can perform this action
+      auth: false,
       policies: [],
-      middlewares: [checkAdminPermission('plugin::strapi-keycloak-passport.manage-role-mappings')],
+      middlewares: [checkAdminPermission(PERMISSIONS.MANAGE_MAPPINGS)],
+      description: 'Save Keycloak to Strapi role mappings',
+    },
+  },
+
+  /**
+   * Test Keycloak Connection
+   * Verifies connectivity to Keycloak server.
+   */
+  {
+    method: 'GET',
+    path: '/test-connection',
+    handler: 'authController.testConnection',
+    config: {
+      auth: false,
+      policies: [],
+      middlewares: [checkAdminPermission(PERMISSIONS.ACCESS)],
+      description: 'Test connection to Keycloak server',
+    },
+  },
+
+  /**
+   * Get Token Cache Statistics
+   * Returns information about cached admin tokens.
+   */
+  {
+    method: 'GET',
+    path: '/token-cache-stats',
+    handler: 'authController.getTokenCacheStats',
+    config: {
+      auth: false,
+      policies: [],
+      middlewares: [checkAdminPermission(PERMISSIONS.ACCESS)],
+      description: 'Get token cache statistics for monitoring',
+    },
+  },
+
+  /**
+   * Invalidate Cached Token
+   * Forces refresh of the cached admin token.
+   */
+  {
+    method: 'POST',
+    path: '/invalidate-token',
+    handler: 'authController.invalidateToken',
+    config: {
+      auth: false,
+      policies: [],
+      middlewares: [checkAdminPermission(PERMISSIONS.MANAGE_MAPPINGS)],
+      description: 'Invalidate the cached Keycloak admin token',
     },
   },
 ];
