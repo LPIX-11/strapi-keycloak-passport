@@ -468,7 +468,7 @@ const AuthOverrideController = {
         email: credentials.email,
         keycloakUserId: keycloakUserInfo.sub,
         userId: String(adminUser.id),
-        roles: adminUser.roles?.map((r) => r.name) || [],
+        roles: adminUser.roles?.map((r) => r?.name).filter(Boolean) || [],
       }, ctx);
 
       // 9. Send response

@@ -388,10 +388,13 @@ const auditLogService = ({ strapi }) => ({
     startDate.setMinutes(startDate.getMinutes() - withinMinutes);
 
     try {
+      // Normalize to lowercase — audit logs store emails lowercased via _extractClientInfo
+      const normalizedEmail = email.toLowerCase().trim();
+
       const count = await strapi.entityService.count(CONTENT_TYPES.AUDIT_LOG, {
         filters: {
           action: AUDIT_ACTIONS.LOGIN_FAILURE,
-          userEmail: email,
+          userEmail: normalizedEmail,
           createdAt: { $gte: startDate },
         },
       });

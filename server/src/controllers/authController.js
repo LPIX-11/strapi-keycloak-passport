@@ -160,7 +160,7 @@ export default {
       const roleMappingService = getRoleMappingService();
       await roleMappingService.saveMappings(mappings, performedBy);
 
-      strapi.log.info(`Saved ${Object.keys(mappings).length} role mappings`);
+      // strapi.log.info(`Saved ${Object.keys(mappings).length} role mappings`);
 
       return ctx.send({
         message: 'Mappings saved successfully.',

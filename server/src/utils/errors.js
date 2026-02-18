@@ -263,6 +263,10 @@ export const extractSafeError = (error) => {
  * @returns {boolean} True if error matches the code
  */
 export const isErrorCode = (error, code) => {
+  if (!error) {
+    return false;
+  }
+
   return error instanceof PluginError && error.code === code;
 };
 

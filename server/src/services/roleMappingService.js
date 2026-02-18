@@ -73,13 +73,28 @@ const roleMappingService = ({ strapi }) => ({
       );
     }
 
-    if (!strapiRole || typeof strapiRole !== 'number' || strapiRole < 1) {
+    // Coerce to integer — request bodies may deliver role IDs as strings
+    const roleId = Number(strapiRole);
+
+    if (!Number.isInteger(roleId) || roleId < 1) {
       throw createSanitizedError(
         ERROR_CODES.INVALID_PAYLOAD,
-        `Invalid Strapi role ID: ${strapiRole}`,
+        `Invalid Strapi role ID: ${strapiRole} (coerced: ${roleId})`,
         'Invalid Strapi role ID provided.'
       );
     }
+  },
+
+  /**
+   * Coerces a strapiRole value (string or number) to a safe integer.
+   * Guards the service layer against type inconsistencies from HTTP payloads.
+   *
+   * @param {string|number} strapiRole - Raw role ID from request
+   * @returns {number} Parsed integer role ID
+   * @private
+   */
+  _coerceRoleId(strapiRole) {
+    return Number(strapiRole);
   },
 
   /**
@@ -123,10 +138,13 @@ const roleMappingService = ({ strapi }) => ({
       const createdMappings = [];
 
       for (const [keycloakRole, strapiRole] of entries) {
+        const normalizedRole = keycloakRole.trim();
+        const roleId = this._coerceRoleId(strapiRole);
+
         const mapping = await strapi.entityService.create(CONTENT_TYPES.ROLE_MAPPING, {
           data: {
-            keycloakRole: keycloakRole.trim(),
-            strapiRole,
+            keycloakRole: normalizedRole,
+            strapiRole: roleId,
           },
         });
 
@@ -135,8 +153,8 @@ const roleMappingService = ({ strapi }) => ({
         // Log audit entry for each mapping (non-blocking)
         auditLogService.logMappingChange({
           action: AUDIT_ACTIONS.MAPPING_CREATED,
-          keycloakRole: keycloakRole.trim(),
-          strapiRole,
+          keycloakRole: normalizedRole,
+          strapiRole: roleId,
           performedBy,
         });
       }
@@ -253,6 +271,8 @@ const roleMappingService = ({ strapi }) => ({
 
     const auditLogService = this._getAuditLogService();
     const normalizedRole = keycloakRole.trim();
+    // Coerce here — same as saveMappings — guards against string IDs from HTTP payloads
+    const roleId = this._coerceRoleId(strapiRole);
 
     try {
       // Check if mapping exists
@@ -262,15 +282,15 @@ const roleMappingService = ({ strapi }) => ({
         // Update existing mapping
         const updated = await strapi.documents(CONTENT_TYPES.ROLE_MAPPING).update({
           documentId: existingMapping.documentId,
-          data: { strapiRole },
+          data: { strapiRole: roleId },
         });
 
-        strapi.log.info(`Updated role mapping: ${normalizedRole} -> ${strapiRole}`);
+        strapi.log.info(`Updated role mapping: ${normalizedRole} -> ${roleId}`);
 
         auditLogService.logMappingChange({
           action: AUDIT_ACTIONS.MAPPING_UPDATED,
           keycloakRole: normalizedRole,
-          strapiRole,
+          strapiRole: roleId,
           performedBy,
         });
 
@@ -281,16 +301,16 @@ const roleMappingService = ({ strapi }) => ({
       const created = await strapi.entityService.create(CONTENT_TYPES.ROLE_MAPPING, {
         data: {
           keycloakRole: normalizedRole,
-          strapiRole,
+          strapiRole: roleId,
         },
       });
 
-      strapi.log.info(`Created role mapping: ${normalizedRole} -> ${strapiRole}`);
+      strapi.log.info(`Created role mapping: ${normalizedRole} -> ${roleId}`);
 
       auditLogService.logMappingChange({
         action: AUDIT_ACTIONS.MAPPING_CREATED,
         keycloakRole: normalizedRole,
-        strapiRole,
+        strapiRole: roleId,
         performedBy,
       });
 
@@ -375,7 +395,8 @@ const roleMappingService = ({ strapi }) => ({
       const deletedCount = result?.count || 0;
 
       if (deletedCount > 0) {
-        strapi.log.info(`Deleted ${deletedCount} role mappings`);
+        const performedByLabel = performedBy?.email || 'system';
+        strapi.log.info(`Deleted ${deletedCount} role mappings (performed by: ${performedByLabel})`);
       }
 
       return deletedCount;
